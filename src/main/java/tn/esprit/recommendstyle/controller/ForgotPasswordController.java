@@ -9,6 +9,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import tn.esprit.recommendstyle.dto.ChangePassword;
 import tn.esprit.recommendstyle.dto.MailBody;
+import tn.esprit.recommendstyle.dto.OtpRequest;
 import tn.esprit.recommendstyle.entity.ForgotPassword;
 import tn.esprit.recommendstyle.entity.Users;
 import tn.esprit.recommendstyle.repository.ForgotPasswordRepository;
@@ -25,65 +26,82 @@ import java.util.Random;
 public class ForgotPasswordController {
     @Autowired
     private UsersRepo usersRepo;
+
     @Autowired
     private EmailService emailService;
+
     @Autowired
-     ForgotPasswordRepository forgotPasswordRepository;
+    private ForgotPasswordRepository forgotPasswordRepository;
+
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    @PostMapping("/verifyMail/{email}")
-    public ResponseEntity<String> verifyEmail(@PathVariable String email) {
-      Users users=  usersRepo.findByEmail(email).
-              orElseThrow(() ->  new UsernameNotFoundException("Please provide an valid email"));
-int otp = otpGenerator();
-        MailBody mailBody = MailBody.builder()
+    // ✅ Étape 1 : Envoyer l'OTP par e-mail
+    @PostMapping("/verifyMail")
+    public ResponseEntity<String> verifyEmail(@RequestBody MailBody mailBody) {
+        String email = mailBody.to();
+
+        Users users = usersRepo.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("Please provide a valid email"));
+
+        int otp = otpGenerator();
+
+        MailBody otpMail = MailBody.builder()
                 .to(email)
-                .text("this is the otp for your Forgot Password request:"+ otp)
+                .subject("Password Reset OTP")
+                .text("This is your OTP for password reset: " + otp)
                 .build();
 
-        ForgotPassword fp = ForgotPassword.builder()
+        ForgotPassword forgotPassword = ForgotPassword.builder()
                 .otp(otp)
-                .expirationTime(new Date(System.currentTimeMillis()+70*1000))
+                .expirationTime(new Date(System.currentTimeMillis() + 70 * 1000)) // 70 sec expiration
                 .user(users)
                 .build();
-        emailService.sendSimpleMessage(mailBody);
-        forgotPasswordRepository.save(fp);
 
-        return ResponseEntity.ok("email sent for verification");
+        emailService.sendSimpleMessage(otpMail);
+        forgotPasswordRepository.save(forgotPassword);
 
+        return ResponseEntity.ok("OTP sent to your email.");
     }
-    @PostMapping("/verifyOtp/{otp}/{email}")
-    public ResponseEntity<String> verifyOtp(@PathVariable Integer otp, @PathVariable String email) {
-        Users users=  usersRepo.findByEmail(email).
-                orElseThrow(() ->  new UsernameNotFoundException("Please provide an valid email"));
 
-       ForgotPassword fp = forgotPasswordRepository.findByOtpAndUser(otp, users).
-                orElseThrow(() -> new RuntimeException("Please provide an valid otp" +email ));
+    // ✅ Étape 2 : Vérifier l'OTP
+    @PostMapping("/verifyOtp")
+    public ResponseEntity<String> verifyOtp(@RequestBody OtpRequest otpRequest) {
+        String email = otpRequest.email();
+        Integer otp = otpRequest.otp();
 
-       if(fp.getExpirationTime().before(Date.from(Instant.now()))){
-           forgotPasswordRepository.deleteById(fp.getFpid());
-           return new ResponseEntity<>("OTP verified", HttpStatus.EXPECTATION_FAILED);
-       }
-       return ResponseEntity.ok("OTP verified");
+        Users users = usersRepo.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("Please provide a valid email"));
 
-    }
-    @PostMapping("/changePassword/{email}")
-    public ResponseEntity<String> changePasswordHandler(@RequestBody ChangePassword changePassword,
-                                                        @PathVariable String email) {
-        if(!Objects.equals(changePassword.password(),changePassword.repeatPassword())){
-            return new ResponseEntity<>("Please enter the password again!", HttpStatus.EXPECTATION_FAILED);
+        ForgotPassword fp = forgotPasswordRepository.findByOtpAndUser(otp, users)
+                .orElseThrow(() -> new RuntimeException("Invalid OTP"));
+
+        if (fp.getExpirationTime().before(Date.from(Instant.now()))) {
+            forgotPasswordRepository.deleteById(fp.getFpid());
+            return new ResponseEntity<>("OTP expired", HttpStatus.EXPECTATION_FAILED);
         }
-        String encryptedPassword = passwordEncoder.encode(changePassword.password());
-        usersRepo.updatePassword(email, encryptedPassword);
-        return ResponseEntity.ok("Password changed");
+
+        return ResponseEntity.ok("OTP verified");
     }
 
+    // ✅ Étape 3 : Changer le mot de passe
+    @PostMapping("/changePassword")
+    public ResponseEntity<String> changePasswordHandler(@RequestBody ChangePassword changePassword) {
+        if (!Objects.equals(changePassword.password(), changePassword.repeatPassword())) {
+            return new ResponseEntity<>("Passwords do not match", HttpStatus.EXPECTATION_FAILED);
+        }
 
+        Users user = usersRepo.findByEmail(changePassword.email())
+                .orElseThrow(() -> new UsernameNotFoundException("Email not found"));
 
-    private Integer otpGenerator(){
-        Random random = new Random();
-        return random.nextInt(100_000,999999);
+        String encryptedPassword = passwordEncoder.encode(changePassword.password());
+        usersRepo.updatePassword(changePassword.email(), encryptedPassword);
 
+        return ResponseEntity.ok("Password changed successfully");
+    }
+
+    // 🔐 Génération OTP à 6 chiffres
+    private Integer otpGenerator() {
+        return new Random().nextInt(100_000, 999_999);
     }
 }

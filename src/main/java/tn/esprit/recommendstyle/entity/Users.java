@@ -73,4 +73,7 @@ public class Users implements UserDetails {
     public void setIsVerified(boolean b) {
         isVerified = b;
     }
+    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL)
+    private ForgotPassword forgotPassword;
+
 }

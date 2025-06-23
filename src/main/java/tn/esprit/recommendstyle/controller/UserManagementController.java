@@ -1,22 +1,36 @@
 package tn.esprit.recommendstyle.controller;
 
+import com.twilio.base.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import tn.esprit.recommendstyle.dto.ReqRes;
 import tn.esprit.recommendstyle.entity.Users;
 import tn.esprit.recommendstyle.repository.UsersRepo;
+import tn.esprit.recommendstyle.service.FileStorageService;
 import tn.esprit.recommendstyle.service.UserManagementService;
 
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.Principal;
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
+@RequiredArgsConstructor
 @RestController
 public class UserManagementController {
+
+    private final FileStorageService fileStorageService;
     @Autowired
     private UserManagementService usersManagementService;
     @Autowired
@@ -37,27 +51,32 @@ public class UserManagementController {
         return ResponseEntity.ok(usersManagementService.refreshToken(req));
     }
     @PostMapping("/auth/verify-code")
-    public ResponseEntity<String> verifyCode(@RequestBody Map
-            <String, String> request) {
+    public ResponseEntity<Map<String, String>> verifyCode(@RequestBody Map<String, String> request) {
         String email = request.get("email");
         String code = request.get("code");
 
         Optional<Users> optionalUser = usersRepo.findByEmail(email);
+        Map<String, String> response = new HashMap<>();
+
         if (optionalUser.isEmpty()) {
-            return ResponseEntity.status(404).body("Utilisateur non trouvé");
+            response.put("message", "Utilisateur non trouvé");
+            return ResponseEntity.status(404).body(response);
         }
 
         Users user = optionalUser.get();
         if (user.isVerified()) {
-            return ResponseEntity.ok("Utilisateur déjà vérifié");
+            response.put("message", "Utilisateur déjà vérifié");
+            return ResponseEntity.ok(response);
         }
 
         if (!code.equals(user.getVerificationCode())) {
-            return ResponseEntity.status(400).body("Code incorrect");
+            response.put("message", "Code incorrect");
+            return ResponseEntity.status(400).body(response);
         }
 
         if (user.getCodeExpirationTime().isBefore(LocalDateTime.now())) {
-            return ResponseEntity.status(400).body("Code expiré");
+            response.put("message", "Code expiré");
+            return ResponseEntity.status(400).body(response);
         }
 
         user.setVerified(true);
@@ -65,8 +84,10 @@ public class UserManagementController {
         user.setCodeExpirationTime(null);
         usersRepo.save(user);
 
-        return ResponseEntity.ok("Email vérifié avec succès");
+        response.put("message", "Email vérifié avec succès");
+        return ResponseEntity.ok(response);
     }
+
 
 
     @GetMapping("/admin/get-all-users")
@@ -98,6 +119,58 @@ public class UserManagementController {
     public ResponseEntity<ReqRes> deleteUSer(@PathVariable Integer userId){
         return ResponseEntity.ok(usersManagementService.deleteUser(userId));
     }
+
+
+
+
+    @PostMapping("/user/uploadImage")
+    public ResponseEntity<String> uploadImage(@RequestParam("file") MultipartFile file,
+                                              Principal principal) throws IOException {
+        Users user = usersRepo.findByEmail(principal.getName())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String fileName = fileStorageService.storeFile(file);
+        user.setImage(fileName);
+        usersRepo.save(user);
+
+        return ResponseEntity.ok(fileName);
+    }
+    @GetMapping("user/image/{filename:.+}")
+    public ResponseEntity<org.springframework.core.io.Resource> getImage(@PathVariable String filename) throws MalformedURLException {
+        Path filePath = Paths.get("uploads").resolve(filename).normalize();
+        org.springframework.core.io.Resource resource = new UrlResource(filePath.toUri());
+
+        if (!resource.exists()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_JPEG)
+                .body(resource);
+    }
+
+    @PostMapping("/user/uploadBase64")
+    public ResponseEntity<String> uploadBase64(@RequestBody Map<String, String> body, Principal principal) throws IOException {
+        String base64 = body.get("image").split(",")[1];
+        byte[] decodedBytes = Base64.getDecoder().decode(base64);
+
+        Users user = usersRepo.findByEmail(principal.getName())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String fileName = UUID.randomUUID() + ".jpg";
+        Path filePath = Paths.get("uploads").resolve(fileName);
+        Files.write(filePath, decodedBytes);
+
+        user.setImage(fileName);
+        usersRepo.save(user);
+
+        return ResponseEntity.ok(fileName);
+    }
+
+
+
+
+
 
 
 }

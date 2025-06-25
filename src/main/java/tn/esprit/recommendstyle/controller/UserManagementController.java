@@ -143,7 +143,6 @@ public class UserManagementController {
         if (!resource.exists()) {
             return ResponseEntity.notFound().build();
         }
-
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_JPEG)
                 .body(resource);

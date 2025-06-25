@@ -1,5 +1,6 @@
 package tn.esprit.recommendstyle.controller;
 
+import jakarta.transaction.Transactional;
 import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -36,6 +37,7 @@ public class ForgotPasswordController {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Transactional
     // ✅ Étape 1 : Envoyer l'OTP par e-mail
     @PostMapping("/verifyMail")
     public ResponseEntity<String> verifyEmail(@RequestBody MailBody mailBody) {
@@ -44,6 +46,7 @@ public class ForgotPasswordController {
         Users users = usersRepo.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Please provide a valid email"));
 
+        forgotPasswordRepository.deleteByUser(users);
         int otp = otpGenerator();
 
         MailBody otpMail = MailBody.builder()

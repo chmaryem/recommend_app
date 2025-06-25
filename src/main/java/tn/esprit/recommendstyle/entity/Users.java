@@ -27,6 +27,8 @@ public class Users implements UserDetails {
     private String password;
     private String role;
     private String image;
+
+
     private String verificationCode;
     private LocalDateTime codeExpirationTime;
     private boolean isVerified = false;

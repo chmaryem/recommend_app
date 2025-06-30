@@ -81,6 +81,11 @@ public class UserManagementService {
             response.setExpirationTime("24Hrs");
             response.setMessage("Connexion réussie");
 
+
+            response.setName(user.getName());
+
+            response.setEmail(user.getEmail());
+
         } catch (Exception e) {
             response.setStatusCode(500);
             response.setMessage("Erreur d'authentification : " + e.getMessage());

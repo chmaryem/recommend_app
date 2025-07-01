@@ -34,4 +34,13 @@ public class EmailService {
         javaMailSender.send(message);
     }
 
+    public void sendNotification(String to, String style) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(to);
+        message.setSubject("Votre Minute de Style");
+        message.setText("Bonjour ! Voici votre inspiration du jour pour un style " + style + ".");
+
+        javaMailSender.send(message);
+    }
+
 }

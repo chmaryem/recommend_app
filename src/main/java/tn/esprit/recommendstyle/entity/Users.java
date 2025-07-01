@@ -8,7 +8,10 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
-import java.io.Serializable;
+
+import javax.validation.constraints.Email;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -22,8 +25,15 @@ public class Users implements UserDetails {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
+    @Email(message = "Email should be valid")
+    @NotBlank(message = "Email is required")
+    @Column(unique = true, nullable = false)
     private String email;
+    @NotBlank(message = "Name is required")
+    @Size(min = 2, max = 50, message = "Name must be between 2 and 50 characters")
     private String name;
+    @NotBlank(message = "Password is required")
+    @Size(min = 8, message = "Password must be at least 8 characters")
     private String password;
     private String role;
     private String image;
@@ -32,8 +42,6 @@ public class Users implements UserDetails {
     private String verificationCode;
     private LocalDateTime codeExpirationTime;
     private boolean isVerified = false;
-
-
 
 
 
@@ -77,5 +85,9 @@ public class Users implements UserDetails {
     }
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL)
     private ForgotPassword forgotPassword;
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<UserPreference> preferences;
+
 
 }

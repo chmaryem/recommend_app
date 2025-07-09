@@ -11,7 +11,7 @@ import java.util.List;
 
 @RestController
 
-@RequestMapping("/user/preferences") // plus logique que /public
+@RequestMapping("/user/preferences")
 public class UserPreferenceController {
     @Autowired
     private UserPreferenceService service;

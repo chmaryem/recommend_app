@@ -4,12 +4,11 @@ import com.twilio.base.Resource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.UrlResource;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import tn.esprit.recommendstyle.dto.ReqRes;
 import tn.esprit.recommendstyle.entity.Users;
@@ -17,6 +16,8 @@ import tn.esprit.recommendstyle.repository.UsersRepo;
 import tn.esprit.recommendstyle.service.FileStorageService;
 import tn.esprit.recommendstyle.service.UserManagementService;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
@@ -37,8 +38,9 @@ public class UserManagementController {
     UsersRepo usersRepo;
 
     @PostMapping("/auth/register")
-    public ResponseEntity<ReqRes> regeister(@RequestBody ReqRes reg){
-        return ResponseEntity.ok(usersManagementService.register(reg));
+    public ResponseEntity<ReqRes> register(@RequestBody ReqRes reg) {
+        ReqRes result = usersManagementService.register(reg);
+        return ResponseEntity.status(result.getStatusCode()).body(result);
     }
 
     @PostMapping("/auth/login")
@@ -166,7 +168,53 @@ public class UserManagementController {
         return ResponseEntity.ok(fileName);
     }
 
+    @PostMapping("/user/uploadBase64WithAnalysis")
+    public ResponseEntity<Map<String, Object>> uploadBase64WithAnalysis(@RequestBody Map<String, String> body,
+                                                                        Principal principal) throws IOException {
+        // 🔓 Extraction de l'image base64
+        String base64 = body.get("image").split(",")[1];
+        byte[] decodedBytes = Base64.getDecoder().decode(base64);
 
+        // 👤 Récupération de l'utilisateur
+        Users user = usersRepo.findByEmail(principal.getName())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // 📂 Sauvegarde de l'image
+        String fileName = UUID.randomUUID() + ".jpg";
+        Path uploadDir = Paths.get("uploads");
+        Files.createDirectories(uploadDir); // assure que le dossier existe
+        Path filePath = uploadDir.resolve(fileName);
+        Files.write(filePath, decodedBytes);
+        BufferedImage img = ImageIO.read(filePath.toFile());
+        System.out.println("📐 Taille image enregistrée : " + img.getWidth() + "x" + img.getHeight());
+        // 📝 Mise à jour utilisateur
+        user.setImage(fileName);
+        usersRepo.save(user);
+
+        // 🚀 Appel à FastAPI avec chemin compatible (Linux-style)
+        String unixPath = filePath.toAbsolutePath().toString().replace("\\", "/");
+
+        // 🔁 Préparer la requête
+        Map<String, String> fastApiRequest = Map.of("image_url", unixPath);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<Map<String, String>> requestEntity = new HttpEntity<>(fastApiRequest, headers);
+        RestTemplate restTemplate = new RestTemplate();
+
+        // 🔍 Appel FastAPI
+        Map<String, Object> fastApiResponse = restTemplate.postForObject(
+                "http://localhost:8087/analyze-image-url", requestEntity, Map.class);
+
+        // 🧠 Fusion de la réponse
+        Map<String, Object> response = new HashMap<>();
+        response.put("fileName", fileName);
+        response.put("emotion", fastApiResponse.get("emotion"));
+        response.put("confidence", fastApiResponse.get("confidence"));
+
+        return ResponseEntity.ok(response);
+    }
 
 
 

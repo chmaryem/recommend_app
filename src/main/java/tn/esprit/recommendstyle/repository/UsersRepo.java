@@ -4,12 +4,15 @@ import jakarta.transaction.Transactional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
 import tn.esprit.recommendstyle.entity.Users;
 
 import java.util.Optional;
-
+@Repository
 public interface UsersRepo extends JpaRepository<Users, Integer> {
     Optional<Users> findByEmail(String email);
+
+
 
     @Transactional
     @Modifying

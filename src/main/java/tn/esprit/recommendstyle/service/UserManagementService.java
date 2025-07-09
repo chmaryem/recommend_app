@@ -24,25 +24,52 @@ public class UserManagementService {
     private PasswordEncoder passwordEncoder;
     @Autowired
     EmailService emailService;
+
     public ReqRes register(ReqRes registrationRequest) {
         ReqRes resp = new ReqRes();
+
         try {
+            String cleanEmail = registrationRequest.getEmail().trim().toLowerCase();
+            Optional<Users> existingUserOpt = usersRepo.findByEmail(cleanEmail);
+
+            if (existingUserOpt.isPresent()) {
+                Users existingUser = existingUserOpt.get();
+                if (existingUser.isVerified()) {
+                    resp.setStatusCode(409); // Conflict
+                    resp.setError("Email already exists.");
+                    return resp;
+                } else {
+                    // Email non vérifié : renvoyer le code à nouveau
+                    String code = String.format("%06d", new Random().nextInt(999999));
+                    existingUser.setVerificationCode(code);
+                    existingUser.setCodeExpirationTime(LocalDateTime.now().plusMinutes(5));
+                    usersRepo.save(existingUser);
+
+                    emailService.sendVerificationCode(existingUser.getEmail(), code);
+
+                    resp.setStatusCode(403); // Forbidden
+                    resp.setMessage("Email non vérifié. Un nouveau code a été envoyé.");
+                    resp.setOurUsers(existingUser);
+                    return resp;
+                }
+            }
+
+            // Nouvel utilisateur
             Users ourUser = new Users();
-            ourUser.setEmail(registrationRequest.getEmail());
+            ourUser.setEmail(cleanEmail);
             ourUser.setRole(registrationRequest.getRole());
             ourUser.setName(registrationRequest.getName());
             ourUser.setPassword(passwordEncoder.encode(registrationRequest.getPassword()));
 
-            // Générer un code à 6 chiffres
             String code = String.format("%06d", new Random().nextInt(999999));
             ourUser.setVerificationCode(code);
-            ourUser.setCodeExpirationTime(LocalDateTime.now().plusMinutes(5)); // Expire dans 5 min
+            ourUser.setCodeExpirationTime(LocalDateTime.now().plusMinutes(5));
             ourUser.setVerified(false);
 
             Users savedUser = usersRepo.save(ourUser);
 
             if (savedUser.getId() > 0) {
-                emailService.sendVerificationCode(savedUser.getEmail(), code); // envoi par email
+                emailService.sendVerificationCode(savedUser.getEmail(), code);
                 resp.setOurUsers(savedUser);
                 resp.setMessage("Utilisateur enregistré. Vérifiez votre email pour le code.");
                 resp.setStatusCode(200);
@@ -52,8 +79,10 @@ public class UserManagementService {
             resp.setStatusCode(500);
             resp.setError("Erreur lors de l'enregistrement: " + e.getMessage());
         }
+
         return resp;
     }
+
 
 
     public ReqRes login(ReqRes loginRequest) {

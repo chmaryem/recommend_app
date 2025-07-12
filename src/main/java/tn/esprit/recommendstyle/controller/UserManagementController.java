@@ -1,5 +1,6 @@
 package tn.esprit.recommendstyle.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.twilio.base.Resource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,9 +12,12 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import tn.esprit.recommendstyle.dto.ReqRes;
+import tn.esprit.recommendstyle.entity.OutfitRecommendationHistory;
 import tn.esprit.recommendstyle.entity.Users;
+import tn.esprit.recommendstyle.repository.OutfitRecommendationHistoryRepo;
 import tn.esprit.recommendstyle.repository.UsersRepo;
 import tn.esprit.recommendstyle.service.FileStorageService;
+import tn.esprit.recommendstyle.service.Recommendation;
 import tn.esprit.recommendstyle.service.UserManagementService;
 
 import javax.imageio.ImageIO;
@@ -36,6 +40,11 @@ public class UserManagementController {
     private UserManagementService usersManagementService;
     @Autowired
     UsersRepo usersRepo;
+    @Autowired
+    private Recommendation recommendationService;
+
+    @Autowired
+    private OutfitRecommendationHistoryRepo historyRepo;
 
     @PostMapping("/auth/register")
     public ResponseEntity<ReqRes> register(@RequestBody ReqRes reg) {
@@ -171,47 +180,65 @@ public class UserManagementController {
     @PostMapping("/user/uploadBase64WithAnalysis")
     public ResponseEntity<Map<String, Object>> uploadBase64WithAnalysis(@RequestBody Map<String, String> body,
                                                                         Principal principal) throws IOException {
-        // 🔓 Extraction de l'image base64
+        // 1. Image
         String base64 = body.get("image").split(",")[1];
         byte[] decodedBytes = Base64.getDecoder().decode(base64);
 
-        // 👤 Récupération de l'utilisateur
         Users user = usersRepo.findByEmail(principal.getName())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // 📂 Sauvegarde de l'image
         String fileName = UUID.randomUUID() + ".jpg";
         Path uploadDir = Paths.get("uploads");
-        Files.createDirectories(uploadDir); // assure que le dossier existe
+        Files.createDirectories(uploadDir);
         Path filePath = uploadDir.resolve(fileName);
         Files.write(filePath, decodedBytes);
-        BufferedImage img = ImageIO.read(filePath.toFile());
-        System.out.println("📐 Taille image enregistrée : " + img.getWidth() + "x" + img.getHeight());
-        // 📝 Mise à jour utilisateur
-        user.setImage(fileName);
-        usersRepo.save(user);
 
-        // 🚀 Appel à FastAPI avec chemin compatible (Linux-style)
+        // 2. Appel FastAPI
         String unixPath = filePath.toAbsolutePath().toString().replace("\\", "/");
-
-        // 🔁 Préparer la requête
         Map<String, String> fastApiRequest = Map.of("image_url", unixPath);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-
         HttpEntity<Map<String, String>> requestEntity = new HttpEntity<>(fastApiRequest, headers);
         RestTemplate restTemplate = new RestTemplate();
 
-        // 🔍 Appel FastAPI
         Map<String, Object> fastApiResponse = restTemplate.postForObject(
                 "http://localhost:8087/analyze-image-url", requestEntity, Map.class);
 
-        // 🧠 Fusion de la réponse
+        String emotion = (String) fastApiResponse.get("emotion");
+        Double confidence = Double.parseDouble(fastApiResponse.get("confidence").toString());
+
+        // 3. Appel Météo (à améliorer: passer lat/lon depuis frontend)
+        String weatherUrl = "https://api.openweathermap.org/data/2.5/weather?lat=36.8&lon=10.2&appid=a31b37f448517c64a3dfa01b0de3ee6a&units=metric";
+        Map weatherData = restTemplate.getForObject(weatherUrl, Map.class);
+
+        String weather = ((Map)((List)weatherData.get("weather")).get(0)).get("main").toString();
+        String temperature = ((Map) weatherData.get("main")).get("temp").toString();
+
+        // 4. Générer tenue
+        Map<String, Object> outfit = recommendationService.generateOutfit(emotion, weather);
+
+        // 5. Enregistrement
+        OutfitRecommendationHistory history = new OutfitRecommendationHistory();
+        history.setUser(user);
+        history.setEmotion(emotion);
+        history.setConfidence(confidence);
+        history.setWeather(weather);
+        history.setTemperature(temperature);
+        history.setImagePath(fileName);
+        history.setRecommendedOutfit(new ObjectMapper().writeValueAsString(outfit));
+        history.setAccepted(null);
+        history.setTimestamp(LocalDateTime.now());
+        historyRepo.save(history);
+
+        // 6. Réponse frontend
         Map<String, Object> response = new HashMap<>();
         response.put("fileName", fileName);
-        response.put("emotion", fastApiResponse.get("emotion"));
-        response.put("confidence", fastApiResponse.get("confidence"));
+        response.put("emotion", emotion);
+        response.put("confidence", confidence);
+        response.put("weather", weather);
+        response.put("temperature", temperature);
+        response.put("outfit", outfit);
 
         return ResponseEntity.ok(response);
     }
